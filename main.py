@@ -7,45 +7,51 @@ from InquirerPy import inquirer
 
 desktop_path=os.path.normpath(os.path.expanduser("~/Desktop"))
 
-# Generate a key and save it into a file
-def write_key(path):
-    key = Fernet.generate_key()
-    with open(path, "wb") as key_file:
-        key_file.write(key)
-    os.chmod(path,0o400)
+class Cryptographer:
+    def __init__(self,key_path,file_path):
+        self.key_path = key_path
+        self.file_path = file_path
+        if os.path.exists(self.key_path):
+            self.key = self.load_key()
+        else:
+            self.write_key()
+    # Generate a key and save it into a file
+    def write_key(self):
+        self.key = Fernet.generate_key()
+        with open(self.key_path, "wb") as key_file:
+            key_file.write(self.key)
+        os.chmod(self.key_path,0o400)
 
-# Load the previously generated key
-def load_key(path):
-    return open(path, "rb").read()
+    # Load the previously generated key
+    def load_key(self):
+        return open(self.key_path, "rb").read()
 
-# Encrypt a file
-def encrypt_file(file_name,key_path):
-    key = load_key(key_path)
-    f = Fernet(key)
+    # Encrypt a file
+    def encrypt_file(self):
+        f = Fernet(self.key)
 
-    with open(file_name, "rb") as file:
-        file_data = file.read()
+        with open(self.file_path, "rb") as file:
+            file_data = file.read()
 
-    encrypted_data = f.encrypt(file_data)
+        encrypted_data = f.encrypt(file_data)
 
-    with open(file_name, "wb") as file:
-        file.write(encrypted_data)
+        with open(self.file_path, "wb") as file:
+            file.write(encrypted_data)
 
-# Decrypt a file
-def decrypt_file(file_name,key_path):
-    key = load_key(key_path)
-    f = Fernet(key)
+    # Decrypt a file
+    def decrypt_file(self):
+        f = Fernet(self.key)
 
-    with open(file_name, "rb") as file:
-        encrypted_data = file.read()
-    try:
-        decrypted_data = f.decrypt(encrypted_data)
-    except InvalidToken as e:
-        print("Decryption failed: Invalid key or corrupted data")
-        sys.exit(1)
-        
-    with open(file_name, "wb") as file:
-        file.write(decrypted_data)
+        with open(self.file_path, "rb") as file:
+            encrypted_data = file.read()
+        try:
+            decrypted_data = f.decrypt(encrypted_data)
+        except InvalidToken as e:
+            print("Decryption failed: Invalid key or corrupted data")
+            sys.exit(1)
+            
+        with open(self.file_path, "wb") as file:
+            file.write(decrypted_data)
 
 def select(msg,choices,default=None):
     action = inquirer.select(
@@ -62,8 +68,8 @@ def new():
     file_path = inquirer.filepath("File to encrypt",default=desktop_path,
                                   validate=lambda x: os.path.exists(x)).execute()
     
-    write_key(key_path)
-    encrypt_file(file_path,key_path)
+    crypt = Cryptographer(key_path,file_path)
+    crypt.encrypt_file()
     sys.exit(0)
     
     
@@ -74,8 +80,8 @@ key_paths=[]
 if os.path.exists("D:\\"):
     key_paths=[os.path.join(root, file) for root, dirs, files in os.walk("D:\\") for file in files if file.endswith(".key")]
 
-a = select("Select a key file",key_paths+["Pick manually","New","Exit"])
-if a=="New":
+a = select("Select a key file",key_paths+["Pick manually","New Key","Exit"])
+if a=="New Key":
     new()
 elif a=="Exit":
     sys.exit(0)
@@ -84,7 +90,7 @@ elif a=="Pick manually":
                                     validate=lambda x: x.endswith(".key")).execute()
 else:
     key_path = a
-    
+
 enORde = select("Encrypt or decrypt?",["Encrypt","Decrypt & Encrypt","Decrypt","Exit"],default="Decrypt & Encrypt")
 if enORde=="Exit":
     sys.exit(0)
@@ -92,15 +98,17 @@ if len(sys.argv)!=2:
     file_path=inquirer.filepath("File to "+enORde.lower(),default=desktop_path).execute()
 else:
     file_path = sys.argv[1]
-    
+
+crypt= Cryptographer(key_path,file_path)
+
 if enORde=="Encrypt":
-    encrypt_file(file_path,key_path)
+    crypt.encrypt_file()
     sys.exit(0)
 elif enORde=="Decrypt":
-    decrypt_file(file_path,key_path)
+    crypt.decrypt_file()
     sys.exit(0)
 else:
-    decrypt_file(file_path,key_path) 
+    crypt.decrypt_file() 
     print("File decrypted. Close the Notepad to encrypt the file.")
     os.startfile(file_path)
     if file_path.endswith(".txt"):
@@ -115,7 +123,7 @@ else:
                 break
     else:
         input("Press Enter to encrypt the file.")
-    encrypt_file(file_path,key_path)
+    crypt.encrypt_file()
     print("File encrypted.")
 if inquirer.confirm("Open file?").execute():
     os.startfile(file_path)
