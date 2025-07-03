@@ -36,7 +36,7 @@ class Cryptographer:
             raise
 
     # Encrypt a file
-    def encrypt_file(self,fn_encrypt="No"):
+    def encrypt_file(self, fn_encrypt="No"):
         f = Fernet(self.key)
         for file_path in self.file_paths:
             try:
@@ -102,7 +102,9 @@ class Cryptographer:
     @staticmethod
     def decrypt_filenames(keypath,file_paths):
         try:
-            f = Fernet(open(keypath, "rb").read())
+            with open(keypath, "rb") as key_file:
+                key = key_file.read()
+            f = Fernet(key)
         except Exception as e:
             print(f"Error loading key for filename decryption: {e}")
             return [os.path.basename(fp) for fp in file_paths]
@@ -136,13 +138,30 @@ def new():
 # ---------------- Main ----------------
 
 # find .key file in an external drive
-key_paths=[]
-if os.path.exists("D:\\"):
+key_paths = []
+partitions = []
+for p in psutil.disk_partitions(all=False):
     try:
-        key_paths=[os.path.join(root, file) for root, dirs, files in os.walk("D:\\") for file in files if file.endswith(".key")]
+        if os.name == 'nt':
+            # On Windows, removable drives often have 'removable' in opts
+            if 'removable' in p.opts.lower():
+                partitions.append(p.device)
+        else:
+            # On Unix, skip system partitions and check for mountpoint accessibility
+            if p.fstype and os.access(p.mountpoint, os.R_OK):
+                partitions.append(p.device)
     except Exception as e:
-        print(f"Error searching for key files: {e}")
-        key_paths = []
+        continue
+
+print("Searching for key files in partitions: " + ", ".join(partitions))
+for partition in partitions:
+    try:
+        for root, dirs, files in os.walk(partition):
+            for file in files:
+                if file.endswith(".key"):
+                    key_paths.append(os.path.join(root, file))
+    except Exception as e:
+        print(f"Error searching for key files in {partition}: {e}")
 
 selected_key_option = select("Select a key file",key_paths+["Pick manually","New Key","Exit"])
 if selected_key_option=="New Key":
@@ -156,15 +175,18 @@ else:
     key_path = selected_key_option
 
 cryptoOperationChoice = select("Encrypt or decrypt?",["Encrypt","Decrypt & Encrypt","Decrypt","Exit"],default="Decrypt & Encrypt")
+
 if cryptoOperationChoice=="Exit":
     sys.exit(0)
+
 if len(sys.argv)<2:
     try:
-        file_paths=[inquirer.filepath("File to "+cryptoOperationChoice.lower(),default=desktop_path).execute()]
+        file_paths=[inquirer.filepath("File(s) to "+cryptoOperationChoice.lower(),default=desktop_path).execute()]
     except Exception as e:
         print(f"Error selecting file: {e}")
         sys.exit(1)
-else:
+
+elif len(sys.argv)==2:
     if os.path.isdir(sys.argv[1]):
         try:
             file_paths = [os.path.join(root, file) for root, dirs, files in os.walk(sys.argv[1]) for file in files]
@@ -173,6 +195,11 @@ else:
             sys.exit(1)
     else:
         file_paths = sys.argv[1:]
+elif len(sys.argv)>2:
+    file_paths = sys.argv[1:]
+else:
+    print("No files provided. Exiting.")
+    sys.exit(1)
 
 if len(file_paths)>1:
     filenames=Cryptographer.decrypt_filenames(key_path,file_paths)
@@ -182,7 +209,7 @@ if len(file_paths)>1:
     else:
         file_paths=[file_paths[filenames.index(i)] for i in selected_files]
 
-crypto= Cryptographer(key_path,file_paths)
+crypto = Cryptographer(key_path, file_paths)
 
 if cryptoOperationChoice=="Encrypt":
     should_encrypt_filenames = select("Do you want to encrypt the filename(s)?",["Yes","No"],default="Yes")
