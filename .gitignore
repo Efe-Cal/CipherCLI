@@ -1,4 +1,5 @@
 *.lnk
 *.ico
-build/
-dist/
+main.build/
+main.dist/
+*.exe

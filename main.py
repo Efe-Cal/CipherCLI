@@ -134,94 +134,94 @@ def new():
                                     validate=lambda x: not os.path.exists(os.path.join(key_path,x+".key")), invalid_message="File already exists.").execute()+".key")
     return key_path
 
-
-# ---------------- Main ----------------
-
-# find .key file in an external drive
-key_paths = []
-partitions = []
-for p in psutil.disk_partitions(all=False):
-    try:
-        if os.name == 'nt':
-            # On Windows, removable drives often have 'removable' in opts
-            if 'removable' in p.opts.lower():
-                partitions.append(p.device)
-        else:
-            # On Unix, skip system partitions and check for mountpoint accessibility
-            if p.fstype and os.access(p.mountpoint, os.R_OK):
-                partitions.append(p.device)
-    except Exception as e:
-        continue
-
-print("Searching for key files in partitions: " + ", ".join(partitions))
-for partition in partitions:
-    try:
-        for root, dirs, files in os.walk(partition):
-            for file in files:
-                if file.endswith(".key"):
-                    key_paths.append(os.path.join(root, file))
-    except Exception as e:
-        print(f"Error searching for key files in {partition}: {e}")
-
-selected_key_option = select("Select a key file",key_paths+["Pick manually","New Key","Exit"])
-if selected_key_option=="New Key":
-    key_path=new()
-elif selected_key_option=="Exit":
-    sys.exit(0)
-elif selected_key_option=="Pick manually":
-    key_path = inquirer.filepath(message="Key path: ",default=desktop_path,
-                                    validate=lambda x: x.endswith(".key")).execute()
-else:
-    key_path = selected_key_option
-
-cryptoOperationChoice = select("Encrypt or decrypt?",["Encrypt","Decrypt & Encrypt","Decrypt","Exit"],default="Decrypt & Encrypt")
-
-if cryptoOperationChoice=="Exit":
-    sys.exit(0)
-
-if len(sys.argv)<2:
-    try:
-        file_paths=[inquirer.filepath("File(s) to "+cryptoOperationChoice.lower(),default=desktop_path).execute()]
-    except Exception as e:
-        print(f"Error selecting file: {e}")
-        sys.exit(1)
-
-elif len(sys.argv)==2:
-    if os.path.isdir(sys.argv[1]):
+def find_key_files():
+    key_paths = []
+    partitions = []
+    for p in psutil.disk_partitions(all=False):
         try:
-            file_paths = [os.path.join(root, file) for root, dirs, files in os.walk(sys.argv[1]) for file in files]
+            if os.name == 'nt':
+                # On Windows, removable drives often have 'removable' in opts
+                if 'removable' in p.opts.lower():
+                    partitions.append(p.device)
+            else:
+                # On Unix, skip system partitions and check for mountpoint accessibility
+                if p.fstype and os.access(p.mountpoint, os.R_OK):
+                    partitions.append(p.device)
+        except Exception:
+            continue
+    if not partitions:
+        print("No accessible partitions found.")
+        return []
+    print("Searching for key files in partitions: " + ", ".join(partitions))
+    for partition in partitions:
+        try:
+            for root, dirs, files in os.walk(partition):
+                for file in files:
+                    if file.endswith(".key"):
+                        key_paths.append(os.path.join(root, file))
         except Exception as e:
-            print(f"Error reading directory '{sys.argv[1]}': {e}")
+            print(f"Error searching for key files in {partition}: {e}")
+    return key_paths
+
+def choose_key_file(key_paths):
+    selected_key_option = select("Select a key file",key_paths+["Pick manually","New Key","Exit"])
+    if selected_key_option=="New Key":
+        key_path=new()
+    elif selected_key_option=="Exit":
+        sys.exit(0)
+    elif selected_key_option=="Pick manually":
+        key_path = inquirer.filepath(message="Key path: ",default=desktop_path,
+                                        validate=lambda x: x.endswith(".key")).execute()
+    else:
+        key_path = selected_key_option
+    return key_path
+
+def get_file_paths_from_args_or_prompt(cryptoOperationChoice):
+    if len(sys.argv)<2:
+        try:
+            file_paths=[inquirer.filepath("File(s) to "+cryptoOperationChoice.lower(),default=desktop_path).execute()]
+        except Exception as e:
+            print(f"Error selecting file: {e}")
             sys.exit(1)
-    else:
+    elif len(sys.argv)==2:
+        if os.path.isdir(sys.argv[1]):
+            try:
+                file_paths = [os.path.join(root, file) for root, dirs, files in os.walk(sys.argv[1]) for file in files]
+            except Exception as e:
+                print(f"Error reading directory '{sys.argv[1]}': {e}")
+                sys.exit(1)
+        else:
+            file_paths = sys.argv[1:]
+    elif len(sys.argv)>2:
         file_paths = sys.argv[1:]
-elif len(sys.argv)>2:
-    file_paths = sys.argv[1:]
-else:
-    print("No files provided. Exiting.")
-    sys.exit(1)
-
-if len(file_paths)>1:
-    filenames=Cryptographer.decrypt_filenames(key_path,file_paths)
-    selected_files = select("Select files to "+cryptoOperationChoice.lower(),filenames+["All"],default="All",multiselect=True)
-    if selected_files==["All"]:
-        pass
     else:
-        file_paths=[file_paths[filenames.index(i)] for i in selected_files]
+        print("No files provided. Exiting.")
+        sys.exit(1)
+    return file_paths
 
-crypto = Cryptographer(key_path, file_paths)
+def select_files_to_operate(file_paths, cryptoOperationChoice, key_path):
+    if len(file_paths)>1:
+        filenames=Cryptographer.decrypt_filenames(key_path,file_paths)
+        selected_files = select("Select files to "+cryptoOperationChoice.lower(),filenames+["All"],default="All",multiselect=True)
+        if selected_files==["All"]:
+            return file_paths
+        else:
+            return [file_paths[filenames.index(i)] for i in selected_files]
+    return file_paths
 
-if cryptoOperationChoice=="Encrypt":
+def handle_encrypt(crypto):
     should_encrypt_filenames = select("Do you want to encrypt the filename(s)?",["Yes","No"],default="Yes")
     print("Encrypting...")
     crypto.encrypt_file(should_encrypt_filenames)
     sys.exit(0)
-elif cryptoOperationChoice=="Decrypt":
+
+def handle_decrypt(crypto):
     fn_encrypted = select("Do you want to decrypt filename(s)?",["Yes","No"],default="Yes")
     print("Decrypting...")
     crypto.decrypt_file(fn_encrypted)
     sys.exit(0)
-else:
+
+def handle_decrypt_and_encrypt(crypto, file_paths):
     crypto.decrypt_file() 
     print("File decrypted. Close the Notepad to encrypt the file.")
     try:
@@ -243,8 +243,27 @@ else:
         input("Press Enter to encrypt the file.")
     crypto.encrypt_file()
     print("File encrypted.")
-if inquirer.confirm("Open file?").execute():
-    try:
-        os.startfile(file_paths)
-    except Exception as e:
-        print(f"Error opening file: {e}")
+    if inquirer.confirm("Open file?").execute():
+        try:
+            os.startfile(file_paths)
+        except Exception as e:
+            print(f"Error opening file: {e}")
+
+def main():
+    key_paths = find_key_files()
+    key_path = choose_key_file(key_paths)
+    cryptoOperationChoice = select("Encrypt or decrypt?",["Encrypt","Decrypt & Encrypt","Decrypt","Exit"],default="Decrypt & Encrypt")
+    if cryptoOperationChoice=="Exit":
+        sys.exit(0)
+    file_paths = get_file_paths_from_args_or_prompt(cryptoOperationChoice)
+    file_paths = select_files_to_operate(file_paths, cryptoOperationChoice, key_path)
+    crypto = Cryptographer(key_path, file_paths)
+    if cryptoOperationChoice=="Encrypt":
+        handle_encrypt(crypto)
+    elif cryptoOperationChoice=="Decrypt":
+        handle_decrypt(crypto)
+    else:
+        handle_decrypt_and_encrypt(crypto, file_paths)
+
+if __name__ == "__main__":
+    main()
